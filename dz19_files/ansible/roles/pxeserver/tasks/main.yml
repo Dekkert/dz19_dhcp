@@ -1,0 +1,143 @@
+---
+- name: Install EPEL Repo package from standart repo
+  yum:
+    name: epel-release
+    state: present
+
+- name: Install DHCP-server
+  yum:
+    name: dhcp-server
+    state: present
+
+- name: Install tftp-server
+  yum:
+    name: tftp-server
+    state: present
+
+- name: Install nginx
+  yum:
+    name: nginx
+    state: present
+
+- name: Configure nginx
+  template:
+    src: ../files/etc/nginx/nginx.conf
+    dest: /etc/nginx/nginx.conf
+  notify:
+    - start nginx
+
+- name: Firewall and SELinix configure
+  shell: |
+    firewall-cmd --add-service=tftp
+    setenforce 0
+    exit 0
+  ignore_errors: false
+
+- name: Burn /etc/dhcp/dhcpd.conf
+  copy:
+    src: ../files/etc/dhcp/dhcpd.conf
+    dest: /etc/dhcp/dhcpd.conf
+  notify:
+    - systemctl-restart-dhcpd
+  tags:
+    - dhcpd.conf
+
+#- name: Install syslinux-tftpboot.noarch
+#  yum:
+#    name: syslinux-tftpboot.noarch
+#    state: present
+
+- name: Create directories
+  shell: |
+    mkdir -p {{ item }}
+    exit 0
+  loop:
+    - "{{ pxelinux_images_dir }}"
+    - "{{ pxelinux_cfg_dir }}"
+    - "{{ ks_cfg_dir }}"
+
+- name: Burn files from syslinux-tftpboot-6.04-4.el8.noarch.rpm
+  copy:
+    src: ../files/var/lib/tftpboot/pxelinux/{{ item }}
+    dest: "{{ pxelinux_dir }}/{{ item }}"
+  loop:
+    - ldlinux.c32
+    - libcom32.c32
+    - libmenu.c32
+    - libutil.c32
+    - menu.c32
+    - pxelinux.0
+    - vesamenu.c32
+
+- name: Burn pxelinux.cfg/default
+  copy:
+    src: ../files/var/lib/tftpboot/pxelinux/pxelinux.cfg/default
+    dest: "{{ pxelinux_cfg_dir }}/default"
+  tags:
+    - pxelinux.cfg-default
+
+- name: Burn initrd.img and vmlinuz
+  copy:
+    src: ../files/iso/{{ item }}
+    dest: "{{ pxelinux_images_dir }}/{{ item }}"
+  loop:
+    - initrd.img
+    - vmlinuz
+    - minimal.iso
+#    - boot.iso
+
+#- name: Mount `dvd.iso` image
+#  shell: |
+#    curl -O http://ftp.mgts.by/pub/CentOS/{{ centos_version }}/isos/x86_64/CentOS-{{ centos_version }}-x86_64-dvd1.iso
+#    mkdir {{ mnt_dir }}/centos8-install
+#    mount -t iso9660 CentOS-{{ centos_version }}-x86_64-dvd1.iso {{ mnt_dir }}/centos8-install
+#    echo '{{ public_mnt_dir }}/centos8-install *(ro)' > {{ exports_file }}
+#    exit 0
+#  ignore_errors: false
+#  notify:
+#    - systemctl-restart-nfs-server
+
+# sftp transfer mechanism failed on [127.0.0.1]. Use ANSIBLE_DEBUG=1 to see detailed information
+- name: Mount `minimal.iso`
+  shell: |
+    mkdir -p {{ mnt_dir }}/centos8-install
+    mount -t iso9660 {{ pxelinux_images_dir }}/minimal.iso {{ mnt_dir }}/centos8-install
+    echo '{{ public_exports_dir }}/centos8-install *(ro)' > {{ exports_dir }}/exports
+    exit 0
+  ignore_errors: false
+  notify:
+    - restart nginx
+    - systemctl-restart-dhcpd
+
+#autoinstall(){
+#  # to speedup replace URL with closest mirror
+#  curl -O http://ftp.mgts.by/pub/CentOS/$centos_version/BaseOS/x86_64/os/images/boot.iso
+#  mkdir /mnt/centos8-autoinstall
+#  mount -t iso9660 boot.iso /mnt/centos8-autoinstall
+#  echo '/mnt/centos8-autoinstall *(ro)' >> /etc/exports
+#  mkdir /home/vagrant/cfg
+
+#- name: Mount `boot.iso` image
+#- name: Mount `image.iso` image
+#  shell: |
+#    mkdir -p {{ mnt_dir }}/centos8-autoinstall
+#    mount -t iso9660 {{ pxelinux_images_dir }}/image.iso {{ mnt_dir }}/centos8-autoinstall
+#    echo '{{ public_exports_dir }}/centos8-autoinstall *(ro)' >> {{ exports_dir }}/exports
+#    exit 0
+#  ignore_errors: false
+#  notify:
+#    - restart nginx
+#    - systemctl-restart-dhcpd
+
+- name: Burn ks.cfg
+  copy:
+    src: ../files/home/vagrant/cfg/ks.cfg
+    dest: "{{ ks_cfg_dir }}/ks.cfg"
+
+#- name: Mount `dvd.iso` image
+#  shell: |
+#    echo '{{ public_ks_cfg_dir }} *(ro)' >> {{ exports_dir }}/exports
+#    exit 0
+#  ignore_errors: false
+#  notify:
+#    - restart nginx
